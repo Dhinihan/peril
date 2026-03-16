@@ -30,18 +30,19 @@ func main() {
 	defer connection.Close()
 	fmt.Println("Connected to message broker")
 	queueName := strings.Join([]string{routing.PauseKey, name}, ".")
-	_, _, err = pubsub.DeclareAndBind(
+
+	gameState := gamelogic.NewGameState(name)
+	err = pubsub.SubscribeJSON(
 		connection,
 		routing.ExchangePerilDirect,
 		queueName,
 		routing.PauseKey,
 		pubsub.TRANSIENT_QUEUE,
+		handlerPause(gameState),
 	)
 	if err != nil {
 		log.Fatalln(err)
 	}
-
-	gameState := gamelogic.NewGameState(name)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -95,5 +96,13 @@ func main() {
 
 	<-sigChan
 	fmt.Println("\n ctrl+c received, shutting down")
+
+}
+
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
+	return func(ps routing.PlayingState) {
+		defer fmt.Print("> ")
+		gs.HandlePause(ps)
+	}
 
 }
