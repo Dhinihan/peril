@@ -40,13 +40,56 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
+
+	gameState := gamelogic.NewGameState(name)
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	fmt.Println("Server is running, press ctrl+c to stop")
 
 	go func() {
 		for {
-			time.Sleep(1 * time.Second)
+			time.Sleep(10 * time.Millisecond)
+			ip := gamelogic.GetInput()
+			if len(ip) < 1 {
+				continue
+			}
+			if ip[0] == "spawn" {
+				fmt.Println("Spawning new unit")
+				err := gameState.CommandSpawn(ip)
+				if err != nil {
+					fmt.Println(err)
+				}
+				continue
+			}
+			if ip[0] == "move" {
+				fmt.Println("Moving units")
+				_, err := gameState.CommandMove(ip)
+				if err != nil {
+					fmt.Println(err)
+				}
+				continue
+			}
+			if ip[0] == "status" {
+				fmt.Println("Printing Status")
+				gameState.CommandStatus()
+				continue
+			}
+			if ip[0] == "help" {
+				fmt.Println("Printing help")
+				gamelogic.PrintClientHelp()
+				continue
+			}
+			if ip[0] == "span" {
+				fmt.Println("Spamming not allowed yet!")
+				continue
+			}
+			if ip[0] == "quit" {
+				gamelogic.PrintQuit()
+				sigChan <- os.Interrupt
+				continue
+			}
+			fmt.Println("unknown command")
 		}
 	}()
 
