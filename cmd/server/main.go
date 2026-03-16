@@ -8,6 +8,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Dhinihan/peril/internal/gamelogic"
+	"github.com/Dhinihan/peril/internal/pubsub"
+	"github.com/Dhinihan/peril/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -20,17 +23,45 @@ func main() {
 	}
 	defer connection.Close()
 	fmt.Println("Connected to message broker")
+	ch, err := connection.Channel()
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer ch.Close()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	fmt.Println("Server is running, press ctrl+c to stop")
+	gamelogic.PrintServerHelp()
 
 	go func() {
 		for {
-			time.Sleep(1 * time.Second)
+			time.Sleep(10 * time.Millisecond)
+			ip := gamelogic.GetInput()
+			if len(ip) < 1 {
+				continue
+			}
+			if ip[0] == "pause" {
+				fmt.Println("sending pause msg")
+				st := routing.PlayingState{IsPaused: true}
+				pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, st)
+				continue
+			}
+			if ip[0] == "resume" {
+				fmt.Println("sending resume msg")
+				st := routing.PlayingState{IsPaused: false}
+				pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, st)
+				continue
+			}
+			if ip[0] == "quit" {
+				fmt.Println("exiting")
+				sigChan <- os.Interrupt
+				continue
+			}
+			fmt.Println("unknown command")
 		}
 	}()
 
 	<-sigChan
-	fmt.Println("\n ctrl+c received, shutting down")
+	fmt.Println("\nshutting down")
 }
