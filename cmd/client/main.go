@@ -29,8 +29,12 @@ func main() {
 	}
 	defer connection.Close()
 	fmt.Println("Connected to message broker")
+	ch, err := connection.Channel()
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer ch.Close()
 	queueName := strings.Join([]string{routing.PauseKey, name}, ".")
-
 	gameState := gamelogic.NewGameState(name)
 	err = pubsub.SubscribeJSON(
 		connection,
@@ -39,6 +43,17 @@ func main() {
 		routing.PauseKey,
 		pubsub.TRANSIENT_QUEUE,
 		handlerPause(gameState),
+	)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	err = pubsub.SubscribeJSON(
+		connection,
+		routing.ExchangePerilTopic,
+		routing.ArmyMovesPrefix+"."+name,
+		routing.ArmyMovesPrefix+".*",
+		pubsub.TRANSIENT_QUEUE,
+		handlerMove(gameState),
 	)
 	if err != nil {
 		log.Fatalln(err)
@@ -65,10 +80,22 @@ func main() {
 			}
 			if ip[0] == "move" {
 				fmt.Println("Moving units")
-				_, err := gameState.CommandMove(ip)
+				move, err := gameState.CommandMove(ip)
 				if err != nil {
 					fmt.Println(err)
+					continue
 				}
+				if err := pubsub.PublishJSON(
+					ch,
+					routing.ExchangePerilTopic,
+					routing.ArmyMovesPrefix+"."+name,
+					move,
+				); err != nil {
+					fmt.Println(err)
+					continue
+				}
+				fmt.Println("Successfully published the move")
+
 				continue
 			}
 			if ip[0] == "status" {
@@ -104,5 +131,10 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
 		defer fmt.Print("> ")
 		gs.HandlePause(ps)
 	}
-
+}
+func handlerMove(gs *gamelogic.GameState) func(am gamelogic.ArmyMove) {
+	return func(am gamelogic.ArmyMove) {
+		defer fmt.Print("> ")
+		gs.HandleMove(am)
+	}
 }
