@@ -29,6 +29,14 @@ func main() {
 	}
 	defer ch.Close()
 
+	pubsub.DeclareAndBind(
+		connection,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug,
+		routing.GameLogSlug+".*",
+		pubsub.DURABLE_QUEUE,
+	)
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	fmt.Println("Server is running, press ctrl+c to stop")
