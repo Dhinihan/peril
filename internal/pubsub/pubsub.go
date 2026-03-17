@@ -8,20 +8,37 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-type SimpleQueueType string
+type SimpleQueueType int
 
-const DURABLE_QUEUE = "durable"
-const TRANSIENT_QUEUE = "transient"
+const (
+	SQTDurable SimpleQueueType = iota
+	SQTTransient
+)
+
+type Acktype int
+
+const (
+	Ack Acktype = iota
+	NackRequeue
+	NackDiscard
+)
 
 func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 	jsonData, err := json.Marshal(val)
 	if err != nil {
 		return err
 	}
-	return ch.PublishWithContext(context.Background(), exchange, key, false, false, amqp.Publishing{
-		ContentType: "application/json",
-		Body:        jsonData,
-	})
+	return ch.PublishWithContext(
+		context.Background(),
+		exchange,
+		key,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        jsonData,
+		},
+	)
 }
 
 func DeclareAndBind(
@@ -35,9 +52,9 @@ func DeclareAndBind(
 	if err != nil {
 		return nil, amqp.Queue{}, err
 	}
-	durable := queueType == DURABLE_QUEUE
-	autoDelete := queueType == TRANSIENT_QUEUE
-	exclusive := queueType == TRANSIENT_QUEUE
+	durable := queueType == SQTDurable
+	autoDelete := queueType == SQTTransient
+	exclusive := queueType == SQTTransient
 	queue, err := ch.QueueDeclare(queueName, durable, autoDelete, exclusive, false, nil)
 	if err != nil {
 		return nil, amqp.Queue{}, err
@@ -54,7 +71,7 @@ func SubscribeJSON[T any](
 	queueName,
 	key string,
 	queueType SimpleQueueType, // an enum to represent "durable" or "transient"
-	handler func(T),
+	handler func(T) Acktype,
 ) error {
 	ch, _, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
 	if err != nil {
@@ -70,8 +87,21 @@ func SubscribeJSON[T any](
 			if err := json.Unmarshal(msg.Body, &payload); err != nil {
 				fmt.Printf("Error decoding payload: \n%v\n", err)
 			}
-			handler(payload)
-			ch.Ack(msg.DeliveryTag, false)
+			res := handler(payload)
+			switch res {
+			case Ack:
+				fmt.Println("Acknoledged")
+				msg.Ack(false)
+			case NackRequeue:
+				fmt.Println("Not acknoledged, requeued")
+				msg.Nack(false, true)
+			case NackDiscard:
+				fmt.Println("Not acknoledged, discarded")
+				msg.Nack(false, false)
+			default:
+				fmt.Printf("Invalid acktype: %d\n", res)
+				msg.Nack(false, false)
+			}
 		}
 	}()
 

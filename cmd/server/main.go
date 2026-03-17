@@ -34,7 +34,7 @@ func main() {
 		routing.ExchangePerilTopic,
 		routing.GameLogSlug,
 		routing.GameLogSlug+".*",
-		pubsub.DURABLE_QUEUE,
+		pubsub.SQTDurable,
 	)
 
 	sigChan := make(chan os.Signal, 1)
