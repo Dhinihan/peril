@@ -55,7 +55,9 @@ func DeclareAndBind(
 	durable := queueType == SQTDurable
 	autoDelete := queueType == SQTTransient
 	exclusive := queueType == SQTTransient
-	queue, err := ch.QueueDeclare(queueName, durable, autoDelete, exclusive, false, nil)
+	tb := amqp.Table{}
+	tb["x-dead-letter-exchange"] = "peril_dlx"
+	queue, err := ch.QueueDeclare(queueName, durable, autoDelete, exclusive, false, tb)
 	if err != nil {
 		return nil, amqp.Queue{}, err
 	}

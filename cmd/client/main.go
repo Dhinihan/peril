@@ -53,7 +53,18 @@ func main() {
 		routing.ArmyMovesPrefix+"."+name,
 		routing.ArmyMovesPrefix+".*",
 		pubsub.SQTTransient,
-		handlerMove(gameState),
+		handlerMove(gameState, ch),
+	)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	err = pubsub.SubscribeJSON(
+		connection,
+		routing.ExchangePerilTopic,
+		routing.WarRecognitionsPrefix,
+		routing.WarRecognitionsPrefix+".*",
+		pubsub.SQTDurable,
+		handlerWar(gameState),
 	)
 	if err != nil {
 		log.Fatalln(err)
@@ -133,7 +144,10 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Ack
 		return pubsub.Ack
 	}
 }
-func handlerMove(gs *gamelogic.GameState) func(am gamelogic.ArmyMove) pubsub.Acktype {
+func handlerMove(
+	gs *gamelogic.GameState,
+	ch *amqp.Channel,
+) func(am gamelogic.ArmyMove) pubsub.Acktype {
 	return func(am gamelogic.ArmyMove) pubsub.Acktype {
 		defer fmt.Print("> ")
 		outcome := gs.HandleMove(am)
@@ -141,6 +155,19 @@ func handlerMove(gs *gamelogic.GameState) func(am gamelogic.ArmyMove) pubsub.Ack
 		case gamelogic.MoveOutComeSafe:
 			return pubsub.Ack
 		case gamelogic.MoveOutcomeMakeWar:
+			key := routing.WarRecognitionsPrefix + "." + am.Player.Username
+			err := pubsub.PublishJSON(
+				ch,
+				routing.ExchangePerilTopic,
+				key,
+				gamelogic.RecognitionOfWar{
+					Attacker: am.Player,
+					Defender: gs.GetPlayerSnap(),
+				},
+			)
+			if err != nil {
+				return pubsub.NackRequeue
+			}
 			return pubsub.Ack
 		case gamelogic.MoveOutcomeSamePlayer:
 			return pubsub.NackDiscard
@@ -148,4 +175,29 @@ func handlerMove(gs *gamelogic.GameState) func(am gamelogic.ArmyMove) pubsub.Ack
 			return pubsub.NackDiscard
 		}
 	}
+}
+
+func handlerWar(
+	gs *gamelogic.GameState,
+) func(gamelogic.RecognitionOfWar) pubsub.Acktype {
+	return func(rw gamelogic.RecognitionOfWar) pubsub.Acktype {
+		defer fmt.Printf("> ")
+		outcome, _, _ := gs.HandleWar(rw)
+		switch outcome {
+		case gamelogic.WarOutcomeNotInvolved:
+			return pubsub.NackRequeue
+		case gamelogic.WarOutcomeNoUnits:
+			return pubsub.NackDiscard
+		case gamelogic.WarOutcomeOpponentWon:
+			return pubsub.Ack
+		case gamelogic.WarOutcomeYouWon:
+			return pubsub.Ack
+		case gamelogic.WarOutcomeDraw:
+			return pubsub.Ack
+		default:
+			fmt.Println("Error processing move message")
+			return pubsub.Ack
+		}
+	}
+
 }
