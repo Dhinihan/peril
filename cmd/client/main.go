@@ -64,7 +64,7 @@ func main() {
 		routing.WarRecognitionsPrefix,
 		routing.WarRecognitionsPrefix+".*",
 		pubsub.SQTDurable,
-		handlerWar(gameState),
+		handlerWar(gameState, ch, name),
 	)
 	if err != nil {
 		log.Fatalln(err)
@@ -179,25 +179,43 @@ func handlerMove(
 
 func handlerWar(
 	gs *gamelogic.GameState,
+	ch *amqp.Channel,
+	username string,
 ) func(gamelogic.RecognitionOfWar) pubsub.Acktype {
 	return func(rw gamelogic.RecognitionOfWar) pubsub.Acktype {
 		defer fmt.Printf("> ")
-		outcome, _, _ := gs.HandleWar(rw)
+		outcome, w, l := gs.HandleWar(rw)
+		var msg string
 		switch outcome {
 		case gamelogic.WarOutcomeNotInvolved:
 			return pubsub.NackRequeue
 		case gamelogic.WarOutcomeNoUnits:
 			return pubsub.NackDiscard
-		case gamelogic.WarOutcomeOpponentWon:
-			return pubsub.Ack
-		case gamelogic.WarOutcomeYouWon:
-			return pubsub.Ack
+		case gamelogic.WarOutcomeYouWon, gamelogic.WarOutcomeOpponentWon:
+			msg = fmt.Sprintf("%s won a war against %s", w, l)
 		case gamelogic.WarOutcomeDraw:
-			return pubsub.Ack
+			msg = fmt.Sprintf("A war between %s and %s resultes in a draw", w, l)
 		default:
 			fmt.Println("Error processing move message")
 			return pubsub.Ack
 		}
+		gl := routing.GameLog{
+			Username:    username,
+			Message:     msg,
+			CurrentTime: time.Now(),
+		}
+		if err := publishGameLog(gl, ch); err != nil {
+			return pubsub.NackRequeue
+		}
+		return pubsub.Ack
 	}
+}
 
+func publishGameLog(gl routing.GameLog, ch *amqp.Channel) error {
+	return pubsub.PublishGob(
+		ch,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug+"."+gl.Username,
+		gl,
+	)
 }
