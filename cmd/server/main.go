@@ -29,13 +29,16 @@ func main() {
 	}
 	defer ch.Close()
 
-	pubsub.DeclareAndBind(
+	if err := pubsub.SubscribeGob(
 		connection,
 		routing.ExchangePerilTopic,
 		routing.GameLogSlug,
 		routing.GameLogSlug+".*",
 		pubsub.SQTDurable,
-	)
+		logHandler,
+	); err != nil {
+		log.Fatalln(err)
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -72,4 +75,13 @@ func main() {
 
 	<-sigChan
 	fmt.Println("\nshutting down")
+}
+
+func logHandler(gl routing.GameLog) pubsub.Acktype {
+	defer fmt.Print("> ")
+	if err := gamelogic.WriteLog(gl); err != nil {
+		return pubsub.NackDiscard
+	}
+	return pubsub.Ack
+
 }
